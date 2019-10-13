@@ -397,6 +397,10 @@ func (c customMarshaled) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.Itoa(int(c))), nil
 }
 
+func (c customMarshaled) MarshalAppendJSON(in []byte) ([]byte, error) {
+	return strconv.AppendInt(in, int64(c), 10), nil
+}
+
 func BenchmarkMarshalMarshaler(b *testing.B) {
 	b.ReportAllocs()
 

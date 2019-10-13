@@ -226,6 +226,10 @@ type Marshaler interface {
 	MarshalJSON() ([]byte, error)
 }
 
+type MarshalAppender interface {
+	MarshalAppendJSON([]byte) ([]byte, error)
+}
+
 // An UnsupportedTypeError is returned by Marshal when attempting
 // to encode an unsupported value type.
 type UnsupportedTypeError struct {
@@ -384,13 +388,22 @@ func typeEncoder(t reflect.Type) encoderFunc {
 }
 
 var (
-	marshalerType     = reflect.TypeOf((*Marshaler)(nil)).Elem()
-	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	marshalerType       = reflect.TypeOf((*Marshaler)(nil)).Elem()
+	textMarshalerType   = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	marshalAppenderType = reflect.TypeOf((*MarshalAppender)(nil)).Elem()
 )
 
 // newTypeEncoder constructs an encoderFunc for a type.
 // The returned encoder only checks CanAddr when allowAddr is true.
 func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
+
+	if t.Implements(marshalAppenderType) {
+		return marshalAppenderEncoder
+	}
+	if t.Kind() != reflect.Ptr && allowAddr && reflect.PtrTo(t).Implements(marshalAppenderType) {
+		return newCondAddrEncoder(addrMarshalAppenderEncoder, newTypeEncoder(t, false))
+	}
+
 	if t.Implements(marshalerType) {
 		return marshalerEncoder
 	}
@@ -459,6 +472,26 @@ func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	}
 }
 
+func marshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		e.WriteString("null")
+		return
+	}
+	m, ok := v.Interface().(MarshalAppender)
+	if !ok {
+		e.WriteString("null")
+		return
+	}
+	b, err := m.MarshalAppendJSON(e.Buffer.Bytes())
+	if err == nil {
+		// we trust the implementer to return good JSON
+		e.Buffer = *bytes.NewBuffer(b)
+	}
+	if err != nil {
+		e.error(&MarshalerError{v.Type(), err})
+	}
+}
+
 func addrMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	va := v.Addr()
 	if va.IsNil() {
@@ -470,6 +503,23 @@ func addrMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	if err == nil {
 		// copy JSON into buffer, checking validity.
 		err = compact(&e.Buffer, b, opts.escapeHTML)
+	}
+	if err != nil {
+		e.error(&MarshalerError{v.Type(), err})
+	}
+}
+
+func addrMarshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	va := v.Addr()
+	if va.IsNil() {
+		e.WriteString("null")
+		return
+	}
+	m := va.Interface().(MarshalAppender)
+	b, err := m.MarshalAppendJSON(e.Buffer.Bytes())
+	if err == nil {
+		// we trust the implementer to return good JSON
+		e.Buffer = *bytes.NewBuffer(b)
 	}
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err})

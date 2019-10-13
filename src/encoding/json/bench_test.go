@@ -19,6 +19,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -388,4 +389,65 @@ func BenchmarkTypeFieldsCache(b *testing.B) {
 			})
 		})
 	}
+}
+
+type customMarshaled int
+
+func (c customMarshaled) MarshalJSON() ([]byte, error) {
+	return []byte(strconv.Itoa(int(c))), nil
+}
+
+func BenchmarkMarshalMarshaler(b *testing.B) {
+	b.ReportAllocs()
+
+	m := struct {
+		A int
+		B customMarshaled
+	}{}
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := Marshal(&m); err != nil {
+				b.Fatal("Marshal:", err)
+			}
+		}
+	})
+}
+
+func BenchmarkMarshalMarshalerEncoder(b *testing.B) {
+	b.ReportAllocs()
+
+	m := struct {
+		A int
+		B customMarshaled
+	}{}
+
+	b.RunParallel(func(pb *testing.PB) {
+		var out bytes.Buffer
+		enc := NewEncoder(&out)
+
+		for pb.Next() {
+			if err := enc.Encode(&m); err != nil {
+				b.Fatal("Marshal:", err)
+			}
+			out.Reset()
+		}
+	})
+}
+
+func BenchmarkCompact(b *testing.B) {
+	b.ReportAllocs()
+
+	data := []byte(`{"hat":{"cheese":"cheddar","type":"flat"}}`)
+
+	b.RunParallel(func(pb *testing.PB) {
+		var out bytes.Buffer
+		for pb.Next() {
+
+			if err := Compact(&out, data); err != nil {
+				b.Fatal("Compact:", err)
+			}
+			out.Reset()
+		}
+	})
 }

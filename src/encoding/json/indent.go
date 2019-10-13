@@ -4,7 +4,10 @@
 
 package json
 
-import "bytes"
+import (
+	"bytes"
+	"sync"
+)
 
 // Compact appends to dst the JSON-encoded src with
 // insignificant space characters elided.
@@ -12,9 +15,16 @@ func Compact(dst *bytes.Buffer, src []byte) error {
 	return compact(dst, src, false)
 }
 
+var scannerPool = sync.Pool{
+	New: func() interface{} {
+		return &scanner{}
+	},
+}
+
 func compact(dst *bytes.Buffer, src []byte, escape bool) error {
 	origLen := dst.Len()
-	var scan scanner
+	scan := scannerPool.Get().(*scanner)
+	defer scannerPool.Put(scan)
 	scan.reset()
 	start := 0
 	for i, c := range src {
@@ -36,7 +46,7 @@ func compact(dst *bytes.Buffer, src []byte, escape bool) error {
 			dst.WriteByte(hex[src[i+2]&0xF])
 			start = i + 3
 		}
-		v := scan.step(&scan, c)
+		v := scan.step(scan, c)
 		if v >= scanSkipSpace {
 			if v == scanError {
 				break

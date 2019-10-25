@@ -12,6 +12,10 @@ import (
 
 // A Decoder reads and decodes JSON values from an input stream.
 type Decoder struct {
+	// Decoder reads complete JSON objects from r into buf, using
+	// the scanner scan to delimit the objects. It then calls into
+	// the unmarshal machinery (which re-uses the decodeState d
+	// between objects) to unmarshal the object from buf.
 	r       io.Reader
 	buf     []byte
 	d       decodeState
@@ -29,7 +33,9 @@ type Decoder struct {
 // The decoder introduces its own buffering and may
 // read data from r beyond the JSON values requested.
 func NewDecoder(r io.Reader) *Decoder {
-	return &Decoder{r: r}
+	d := &Decoder{r: r}
+	d.d.scan = newScanner()
+	return d
 }
 
 // UseNumber causes the Decoder to unmarshal a number into an interface{} as a

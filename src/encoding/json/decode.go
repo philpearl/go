@@ -98,7 +98,9 @@ func Unmarshal(data []byte, v interface{}) error {
 	// Avoids filling out half a data structure
 	// before discovering a JSON syntax error.
 	var d decodeState
-	err := checkValid(data, &d.scan)
+	d.scan = newScanner()
+	defer freeScanner(d.scan)
+	err := checkValid(data, d.scan)
 	if err != nil {
 		return err
 	}
@@ -205,7 +207,7 @@ type decodeState struct {
 	data         []byte
 	off          int // next read offset in data
 	opcode       int // last read result
-	scan         scanner
+	scan         *scanner
 	errorContext struct { // provides context for type errors
 		Struct     reflect.Type
 		FieldStack []string
@@ -225,7 +227,7 @@ func (d *decodeState) readIndex() int {
 // something is editing the data slice while the decoder executes.
 const phasePanicMsg = "JSON decoder out of sync - data changing underfoot?"
 
-func (d *decodeState) init(data []byte) *decodeState {
+func (d *decodeState) init(data []byte) {
 	d.data = data
 	d.off = 0
 	d.savedError = nil
@@ -233,7 +235,6 @@ func (d *decodeState) init(data []byte) *decodeState {
 
 	// Reuse the allocated space for the FieldStack slice.
 	d.errorContext.FieldStack = d.errorContext.FieldStack[:0]
-	return d
 }
 
 // saveError saves the first err it is called with,
@@ -259,7 +260,7 @@ func (d *decodeState) addErrorContext(err error) error {
 
 // skip scans to the end of what was started.
 func (d *decodeState) skip() {
-	s, data, i := &d.scan, d.data, d.off
+	s, data, i := d.scan, d.data, d.off
 	depth := len(s.parseState)
 	for {
 		op := s.step(s, data[i])
@@ -275,7 +276,7 @@ func (d *decodeState) skip() {
 // scanNext processes the byte at d.data[d.off].
 func (d *decodeState) scanNext() {
 	if d.off < len(d.data) {
-		d.opcode = d.scan.step(&d.scan, d.data[d.off])
+		d.opcode = d.scan.step(d.scan, d.data[d.off])
 		d.off++
 	} else {
 		d.opcode = d.scan.eof()
@@ -286,7 +287,7 @@ func (d *decodeState) scanNext() {
 // scanWhile processes bytes in d.data[d.off:] until it
 // receives a scan code not equal to op.
 func (d *decodeState) scanWhile(op int) {
-	s, data, i := &d.scan, d.data, d.off
+	s, data, i := d.scan, d.data, d.off
 	for i < len(data) {
 		newOp := s.step(s, data[i])
 		i++
@@ -340,7 +341,7 @@ Switch:
 		i += len("ull")
 	}
 	if i < len(data) {
-		d.opcode = stateEndValue(&d.scan, data[i])
+		d.opcode = stateEndValue(d.scan, data[i])
 	} else {
 		d.opcode = scanEnd
 	}

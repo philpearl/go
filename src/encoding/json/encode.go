@@ -220,10 +220,20 @@ func HTMLEscape(dst *bytes.Buffer, src []byte) {
 	}
 }
 
-// Marshaler is the interface implemented by types that
-// can marshal themselves into valid JSON.
+// Marshaler is deprecated. Use MarshalAppender instead
 type Marshaler interface {
 	MarshalJSON() ([]byte, error)
+}
+
+// MarshalAppender is the interface implemented by types
+// that can marshal themselves into valid JSON. Implementations
+// may append the JSON to in to save allocations.
+//
+// The returned JSON should be valid and compacted, but this is
+// not checked: implementers can call Compact before returning to
+// ensure this is the case.
+type MarshalAppender interface {
+	MarshalAppendJSON(in []byte) ([]byte, error)
 }
 
 // An UnsupportedTypeError is returned by Marshal when attempting
@@ -406,8 +416,9 @@ func typeEncoder(t reflect.Type) encoderFunc {
 }
 
 var (
-	marshalerType     = reflect.TypeOf((*Marshaler)(nil)).Elem()
-	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	marshalerType       = reflect.TypeOf((*Marshaler)(nil)).Elem()
+	marshalAppenderType = reflect.TypeOf((*MarshalAppender)(nil)).Elem()
+	textMarshalerType   = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
 )
 
 // newTypeEncoder constructs an encoderFunc for a type.
@@ -417,6 +428,13 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	// Marshaler with a value receiver, then we're better off taking
 	// the address of the value - otherwise we end up with an
 	// allocation as we cast the value to an interface.
+	if t.Kind() != reflect.Ptr && allowAddr && reflect.PtrTo(t).Implements(marshalAppenderType) {
+		return newCondAddrEncoder(addrMarshalAppenderEncoder, newTypeEncoder(t, false))
+	}
+	if t.Implements(marshalAppenderType) {
+		return marshalAppenderEncoder
+	}
+
 	if t.Kind() != reflect.Ptr && allowAddr && reflect.PtrTo(t).Implements(marshalerType) {
 		return newCondAddrEncoder(addrMarshalerEncoder, newTypeEncoder(t, false))
 	}
@@ -462,6 +480,42 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 
 func invalidValueEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 	e.WriteString("null")
+}
+
+func marshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		e.WriteString("null")
+		return
+	}
+	m, ok := v.Interface().(MarshalAppender)
+	if !ok {
+		e.WriteString("null")
+		return
+	}
+	b, err := m.MarshalAppendJSON(e.scratch[:0])
+	if err == nil {
+		// copy JSON into buffer, checking validity.
+		err = compact(&e.Buffer, b, opts.escapeHTML)
+	}
+	if err != nil {
+		e.error(&MarshalerError{v.Type(), err, "MarshalAppendJSON"})
+	}
+}
+
+func addrMarshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	va := v.Addr()
+	if va.IsNil() {
+		e.WriteString("null")
+		return
+	}
+	m := va.Interface().(MarshalAppender)
+	b, err := m.MarshalAppendJSON(e.scratch[:0])
+	if err != nil {
+		e.error(&MarshalerError{v.Type(), err, "MarshalAppendJSON"})
+	}
+
+	// We trust implementers of MarshalAppender to generate valid, maximally compact JSON
+	e.Write(b)
 }
 
 func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {

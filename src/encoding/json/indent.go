@@ -22,7 +22,7 @@ func Compact(dst *bytes.Buffer, src []byte) error {
 }
 
 func compact(dst *byteWriter, src []byte, escape bool) error {
-	origLen := dst.Len()
+	origBuf := dst.buf
 	scan := newScanner()
 	defer freeScanner(scan)
 	start := 0
@@ -31,9 +31,7 @@ func compact(dst *byteWriter, src []byte, escape bool) error {
 			if start < i {
 				dst.Write(src[start:i])
 			}
-			dst.WriteString(`\u00`)
-			dst.WriteByte(hex[c>>4])
-			dst.WriteByte(hex[c&0xF])
+			dst.buf = append(dst.buf, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xF])
 			start = i + 1
 		}
 		// Convert U+2028 and U+2029 (E2 80 A8 and E2 80 A9).
@@ -41,8 +39,7 @@ func compact(dst *byteWriter, src []byte, escape bool) error {
 			if start < i {
 				dst.Write(src[start:i])
 			}
-			dst.WriteString(`\u202`)
-			dst.WriteByte(hex[src[i+2]&0xF])
+			dst.buf = append(dst.buf, '\\', 'u', '2', '0', '2', hex[src[i+2]&0xF])
 			start = i + 3
 		}
 		v := scan.step(scan, c)
@@ -57,7 +54,7 @@ func compact(dst *byteWriter, src []byte, escape bool) error {
 		}
 	}
 	if scan.eof() == scanError {
-		dst.Truncate(origLen)
+		dst.buf = origBuf
 		return scan.err
 	}
 	if start < len(src) {

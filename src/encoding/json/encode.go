@@ -162,7 +162,8 @@ func Marshal(v interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	buf := append([]byte(nil), e.Bytes()...)
+	buf := e.byteWriter.buf
+	e.byteWriter.buf = nil
 
 	encodeStatePool.Put(e)
 
@@ -310,24 +311,8 @@ func (b *byteWriter) WriteByte(in byte) error {
 	return nil
 }
 
-func (b *byteWriter) Bytes() []byte {
-	return b.buf
-}
-
-func (b *byteWriter) Reset() {
+func (b *byteWriter) reset() {
 	b.buf = b.buf[:0]
-}
-
-func (b *byteWriter) Truncate(to int) {
-	b.buf = b.buf[:to]
-}
-
-func (b *byteWriter) Len() int {
-	return len(b.buf)
-}
-
-func (b *byteWriter) String() string {
-	return string(b.buf)
 }
 
 // An encodeState encodes JSON into a bytes.Buffer.
@@ -351,7 +336,7 @@ var encodeStatePool sync.Pool
 func newEncodeState() *encodeState {
 	if v := encodeStatePool.Get(); v != nil {
 		e := v.(*encodeState)
-		e.Reset()
+		e.reset()
 		if len(e.ptrSeen) > 0 {
 			panic("ptrEncoder.encode should have emptied ptrSeen via defers")
 		}

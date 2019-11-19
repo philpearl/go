@@ -216,7 +216,7 @@ func (enc *Encoder) Encode(v interface{}) error {
 	// digits coming.
 	e.WriteByte('\n')
 
-	b := e.Bytes()
+	b := e.byteWriter.buf
 	if enc.indentPrefix != "" || enc.indentValue != "" {
 		if enc.indentBuf == nil {
 			enc.indentBuf = new(bytes.Buffer)

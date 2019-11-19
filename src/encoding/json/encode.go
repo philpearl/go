@@ -291,10 +291,49 @@ func (e *MarshalerError) Unwrap() error { return e.Err }
 
 var hex = "0123456789abcdef"
 
+// byteWriter is a simplified bytes.Buffer that you cannot read from. This allows us to use the internal []byte within the struct without loads of mental gymnastics
+type byteWriter struct {
+	buf []byte
+}
+
+func (b *byteWriter) Write(in []byte) (int, error) {
+	b.buf = append(b.buf, in...)
+	return len(in), nil
+}
+
+func (b *byteWriter) WriteString(in string) {
+	b.buf = append(b.buf, in...)
+}
+
+func (b *byteWriter) WriteByte(in byte) error {
+	b.buf = append(b.buf, in)
+	return nil
+}
+
+func (b *byteWriter) Bytes() []byte {
+	return b.buf
+}
+
+func (b *byteWriter) Reset() {
+	b.buf = b.buf[:0]
+}
+
+func (b *byteWriter) Truncate(to int) {
+	b.buf = b.buf[:to]
+}
+
+func (b *byteWriter) Len() int {
+	return len(b.buf)
+}
+
+func (b *byteWriter) String() string {
+	return string(b.buf)
+}
+
 // An encodeState encodes JSON into a bytes.Buffer.
 type encodeState struct {
-	bytes.Buffer // accumulated output
-	scratch      [64]byte
+	byteWriter // accumulated output
+	scratch    [64]byte
 
 	// Keep track of what pointers we've seen in the current recursive call
 	// path, to avoid cycles that could lead to a stack overflow. Only do
@@ -492,14 +531,14 @@ func marshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 		e.WriteString("null")
 		return
 	}
-	b, err := m.MarshalAppendJSON(e.scratch[:0])
-	if err == nil {
-		// copy JSON into buffer, checking validity.
-		err = compact(&e.Buffer, b, opts.escapeHTML)
-	}
+	b, err := m.MarshalAppendJSON(e.byteWriter.buf)
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err, "MarshalAppendJSON"})
+		return
 	}
+
+	// We trust implementers of MarshalAppender to generate valid, maximally compact JSON
+	e.byteWriter.buf = b
 }
 
 func addrMarshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
@@ -509,13 +548,14 @@ func addrMarshalAppenderEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 		return
 	}
 	m := va.Interface().(MarshalAppender)
-	b, err := m.MarshalAppendJSON(e.scratch[:0])
+	b, err := m.MarshalAppendJSON(e.byteWriter.buf)
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err, "MarshalAppendJSON"})
+		return
 	}
 
 	// We trust implementers of MarshalAppender to generate valid, maximally compact JSON
-	e.Write(b)
+	e.byteWriter.buf = b
 }
 
 func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
@@ -531,7 +571,7 @@ func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.
-		err = compact(&e.Buffer, b, opts.escapeHTML)
+		err = compact(&e.byteWriter, b, opts.escapeHTML)
 	}
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err, "MarshalJSON"})
@@ -548,7 +588,7 @@ func addrMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.
-		err = compact(&e.Buffer, b, opts.escapeHTML)
+		err = compact(&e.byteWriter, b, opts.escapeHTML)
 	}
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err, "MarshalJSON"})

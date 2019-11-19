@@ -272,7 +272,10 @@ func (m RawMessage) MarshalAppendJSON(in []byte) ([]byte, error) {
 	if m == nil {
 		return append(in, nullLiteral...), nil
 	}
-	return m, nil
+	if !Valid(m) {
+		return nil, errors.New("json.RawMessage: raw message is not valid JSON")
+	}
+	return append(in, m...), nil
 }
 
 // UnmarshalJSON sets *m to a copy of data.

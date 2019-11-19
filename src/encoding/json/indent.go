@@ -11,10 +11,17 @@ import (
 // Compact appends to dst the JSON-encoded src with
 // insignificant space characters elided.
 func Compact(dst *bytes.Buffer, src []byte) error {
-	return compact(dst, src, false)
+	// You've got to wonder why this API takes a bytes.Buffer
+	dst.Grow(len(src))
+	b := byteWriter{buf: dst.Bytes()[dst.Len():]}
+	err := compact(&b, src, false)
+	if err == nil {
+		dst.Write(b.buf)
+	}
+	return err
 }
 
-func compact(dst *bytes.Buffer, src []byte, escape bool) error {
+func compact(dst *byteWriter, src []byte, escape bool) error {
 	origLen := dst.Len()
 	scan := newScanner()
 	defer freeScanner(scan)
